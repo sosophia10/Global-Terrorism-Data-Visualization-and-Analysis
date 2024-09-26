@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Attack Map with Analytics Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/leaflet.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+
+    <style>
+        body,
+        html {
+            height: 100%;
+            margin: 0;
+        }
+
+        #map {
+            height: 100%
+        }
+
+        #details {
+            display: flex;
+            padding: 0 20px;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+
+        #dashboard-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            position: relative;
+            /* Required for the divider to work properly */
+            overflow: hidden;
+
+        }
+
+        #map-container {
+            height: calc(100% - 200px);
+            /* Initial height, leaving room for the dashboard */
+            transition: height 0.3s ease-out;
+        }
+
+        #dashboard {
+            height: 200px;
+            /* Initial height for the dashboard */
+            transition: height 0.3s ease-out;
+            overflow: auto;
+            background: #f8f9fa;
+            /* Background color for visibility */
+        }
+
+        #divider {
+            height: 20px;
+            bottom: 185px;
+            background: #999999;
+            cursor: row-resize;
+            position: absolute;
+            width: 100%;
+            z-index: 9999;
+            /* Ensure the divider is above other elements */
+        }
+
+        #divider:hover {
+            background: #CCC;
+        }
+
+
+        .chart-container {
+            padding: 20px 0px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+
+            grid-auto-rows: 250px;
+            justify-items: center;
+            overflow-x: hidden;
+
+        }
+
+        canvas {
+            width: 100%;
+            /* Ensure canvas elements don't exceed their grid area */
+            max-height: 200px;
+            /* Adjust height as needed */
+
+        }
+
+        #timelineGraph {
+            grid-column: span 3;
+            max-width: 800px;
+
+            /* Span two columns for timeline */
+        }
+
+        #propextentChart,
+        #targsubtypeChart,
+        #attacktypeChart,
+        #gnameChart {
+            grid-column: span 2;
+
+            /* Span one column for pie charts */
+        }
+
+        /* Responsive layout adjustments */
+        @media (max-width: 600px) {
+            #timelineGraph {
+                grid-column: span 2;
+                /* Stack charts on smaller screens */
+            }
+        }
+    </style>
+</head>
+
+
+<body>
+
+    <div id="dashboard-container">
+        <div id="details">
+            <p>Date range: <span id="date-range">No data</span></p>
+            <p>Fatalities: <span id="fatalities">0</span></p>
+            <p>Visible Points: <span id="visible-points">0</span></p>
+        </div>
+        <div id="divider"></div>
+        <div id="map-container">
+            <div id="map"></div>
+        </div>
+        <div id="dashboard">
+            <div class="chart-container">
+                <canvas id="timelineGraph"></canvas>
+                <canvas id="propextentChart"></canvas>
+                <canvas id="targsubtypeChart"></canvas>
+                <canvas id="attacktypeChart"></canvas>
+                <canvas id="gnameChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        var map = L.map('map').setView([20, 0], 2);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19
+        }).addTo(map);
+        var markersLayer = new L.LayerGroup().addTo(map);
+        var selectedMarkerData = null;
+
+        const divider = document.getElementById('divider');
+        const mapContainer = document.getElementById('map-container');
+        const dashboard = document.getElementById('dashboard');
+        let startY;
+        let startMapHeight;
+        let startDashboardHeight;
+        let isDragging = false;
+
+        // Use clientY for vertical dragging
+        divider.addEventListener('mousedown', function (e) {
+            e.preventDefault();
+            isDragging = true;
+            startY = e.clientY;
+            startHeightMap = mapContainer.offsetHeight;
+            startHeightDashboard = dashboard.offsetHeight;
+        });
+
+        document.addEventListener('mousemove', function (e) {
+            if (!isDragging) return;
+            const dy = e.clientY - startY; // Reversed to move in the correct direction
+            const newMapHeight = startHeightMap + dy;
+            const newDashboardHeight = startHeightDashboard - dy;
+
+            if (newMapHeight > 50 && newDashboardHeight > 50) { // Set a minimum height for both
+                mapContainer.style.height = `${newMapHeight}px`;
+                dashboard.style.height = `${newDashboardHeight}px`;
+                divider.style.bottom = `${newDashboardHeight}px`; // Adjust based on the bottom property
+                map.invalidateSize(); // Leaflet method to adjust to new container size
+            }
+        });
+
+        document.addEventListener('mouseup', function () {
+            isDragging = false;
+        });
+
+
+
+        function onMouseMove(e) {
+            e.preventDefault(); // Prevent default behavior
+            const dy = e.clientY - startY;
+            const newMapHeight = startHeightMap - dy;
+            const newDashboardHeight = startHeightDashboard + dy;
+
+            // Set minimum and maximum limits for resizing
+            if (newMapHeight > window.innerHeight * 0.2 && newDashboardHeight > 100) { // Minimum size constraints
+                mapContainer.style.height = `${newMapHeight}px`;
+                dashboard.style.height = `${newDashboardHeight}px`;
+                divider.style.top = `${newMapHeight}px`;
+                map.invalidateSize();
+            }
+        }
+
+        function onMouseUp(e) {
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+        }
+
+        // Existing chart instance, if defined globally
+        var myTimelineChart;
+
+        function updateTimelineChart(timelineData) {
+            updateOrCreateChart('timelineGraph', 'bar', timelineData);
+        }
+
+        function updateOrCreateChart(chartId, chartType, chartData) {
+            var ctx = document.getElementById(chartId).getContext('2d');
+            if (window[chartId] && window[chartId] instanceof Chart) {
+                window[chartId].destroy(); // Destroy the chart before creating a new one
+            }
+            // Initialize a new chart instance
+            window[chartId] = new Chart(ctx, {
+                type: chartType,
+                data: chartData,
+                options: {
+                    // Options for the timeline chart
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                parser: 'YYYY-MM', // The parser must match the label format
+                                unit: 'month',
+                                tooltipFormat: 'MMMM YYYY',
+                            },
+                            title: {
+                                display: true,
+                                text: 'Date'
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Number of Events'
+                            }
+                        }
+                    },
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            });
+        }
+
+
+
+        function fetchData() {
+            var bounds = map.getBounds();
+            $.ajax({
+                url: '/data',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    bounds: {
+                        north: bounds.getNorth(),
+                        south: bounds.getSouth(),
+                        east: bounds.getEast(),
+                        west: bounds.getWest()
+                    },
+                    zoom: map.getZoom()
+                }),
+                success: function (response) {
+                    var points = JSON.parse(response.points);
+                    updateMapAndDashboard(points);
+                },
+                error: function (xhr, status, error) {
+                    console.error('Data fetch error:', xhr.responseText);
+                }
+            });
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr || dateStr === 'Unknown') return 'No data';
+            return dateStr.split('T')[0]; // This splits the datetime string by 'T' and returns only the date part
+        }
+
+        function getDateRange(data) {
+            if (!data || data.length === 0) {
+                return 'No data available';
+            }
+
+            let minDate = new Date(data[0].date), maxDate = new Date(data[0].date);
+            data.forEach(function (item) {
+                let itemDate = new Date(item.date);
+                if (itemDate < minDate) minDate = itemDate;
+                if (itemDate > maxDate) maxDate = itemDate;
+            });
+
+            // Format as "YYYY-MM-DD" for display
+            let formatDate = function (date) {
+                return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
+            };
+
+            return formatDate(maxDate) + ' to ' + formatDate(minDate);
+        }
+
+        function fetchTimelineData() {
+            var bounds = map.getBounds();
+            $.ajax({
+                url: '/timeline_data',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    bounds: {
+                        north: bounds.getNorth(),
+                        south: bounds.getSouth(),
+                        east: bounds.getEast(),
+                        west: bounds.getWest()
+                    },
+                    zoom: map.getZoom()
+                }),
+                success: function (response) {
+                    console.log('Fetched timeline data:', response);
+                    const processedData = processDataForTimelineChart(response.timeline);
+                    updateTimelineChart(processedData);
+                },
+                error: function (xhr, status, error) {
+                    console.error('Timeline data fetch error:', xhr.responseText);
+                }
+            });
+        }
+
+
+
+        function processDataForTimelineChart(data) {
+            let labels = [];
+            let datasetData = [];
+
+            // Adapt the function to handle both an array of items and a single item uniformly.
+            // Convert single object to an array if needed.
+            if (!Array.isArray(data)) {
+                data = [data]; // Wrap the single object into an array for uniform processing.
+            }
+
+            // Check if data is empty or undefined
+            if (!data || data.length === 0) {
+                console.error('No data provided to processDataForTimelineChart');
+                return {
+                    labels: [],
+                    datasets: [{
+                        label: "Events",
+                        data: [],
+                        backgroundColor: 'rgba(54, 162, 235, 1)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                };
+            }
+
+            // Assuming each item in `data` has a `date_min` and `event_count` property.
+            // Sort and process the data to fit the timeline chart.
+            data.sort((a, b) => new Date(a.date_min) - new Date(b.date_min)).forEach(item => {
+                // Here we assume `date_min` is a valid date string and `event_count` is available.
+                // Adjust property names as necessary based on actual data structure.
+                const date = new Date(item.date_min);
+                const label = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                labels.push(label);
+                datasetData.push(item.event_count || 1); // Default to 1 if `event_count` is missing.
+            });
+
+            return {
+                labels: labels,
+                datasets: [{
+                    label: "Events",
+                    data: datasetData,
+                    backgroundColor: 'rgba(54, 162, 235, 1)',
+                    borderColor: 'rgba(54, 162, 235, 1)',
+                    borderWidth: 1
+                }]
+            };
+        }
+
+
+        function processDataForPieChart(data, propertyName) {
+            // Example implementation for pie chart data processing
+            var labels = [];
+            var values = [];
+
+            // Assuming data is an array of objects and propertyName is the key for the value to count
+            data.forEach(function (item) {
+                if (!labels.includes(item[propertyName])) {
+                    labels.push(item[propertyName]);
+                    values.push(1);
+                } else {
+                    values[labels.indexOf(item[propertyName])]++;
+                }
+            });
+
+            var pieData = {
+                labels: labels,
+                datasets: [{
+                    label: propertyName,
+                    data: values,
+                    backgroundColor: [
+                        // Define your colors here
+                    ],
+                    borderColor: [
+                        // Define your border colors here
+                    ],
+                    borderWidth: 1
+                }]
+            };
+
+            return pieData;
+        }
+
+        function updateMapAndDashboard(data) {
+            console.log("Updating dashboard for data:", data.length, "items");
+            markersLayer.clearLayers();
+            let currentZoomLevel = map.getZoom();
+
+            data.forEach(function (item) {
+
+                if (item.latitude_mean && item.longitude_mean) {
+                    var popupContent = createPopupContent(item, currentZoomLevel); // Pass currentZoomLevel here
+                    var marker = L.marker([item.latitude_mean, item.longitude_mean])
+                        .bindPopup(popupContent)
+                        .on('click', function () {
+                            onMarkerClick(item);
+                        });
+                    markersLayer.addLayer(marker);
+                }
+            });
+
+            if (selectedMarkerData) {
+                updateDashboardDetails([selectedMarkerData]);
+            } else {
+                updateDashboardDetails(data);
+            }
+
+            // Update charts with the processed data
+            const timelineData = processDataForTimelineChart(data);
+            updateOrCreateChart('timelineGraph', 'bar', timelineData);
+
+            // Correctly calculate the date range using the getDateRange function
+            var dateRangeText = data.length ? formatDate(data[0].date_min) + ' to ' + formatDate(data[data.length - 1].date_max) : 'No data';
+            document.getElementById('date-range').textContent = dateRangeText;
+
+            // Correctly calculate the total fatalities and other summaries
+            var totalFatalities = data.reduce((acc, item) => acc + (item.nkill || 0), 0);
+            document.getElementById('fatalities').textContent = totalFatalities;
+            document.getElementById('visible-points').textContent = data.length;
+
+
+            updateCharts(data);
+        }
+
+
+        function onMarkerClick(item) {
+            // Handles marker click events, setting the selected marker data and updating the dashboard.
+            selectedMarkerData = item;
+            updateDashboardDetails([item]); // Force the dashboard to update based on the selected marker.
+
+            // Log for debugging - ensure selected data is processed correctly
+            console.log('Selected Marker Data:', item);
+
+            // Fetch and display relevant timeline data for the selected marker
+            const filteredData = processDataForTimelineChart([item]);
+            updateOrCreateChart('timelineGraph', 'bar', filteredData);
+        }
+
+
+        function createPopupContent(item, zoomLevel) {
+            console.log(item);
+            var popupContent = '<b>Region:</b> ' + (item.region_txt_ || 'Region not specified') + '<br>';
+            // Check if region, country, and city are specified
+            if (zoomLevel >= 3 && zoomLevel < 6) {
+                popupContent += '<b>Country:</b> ' + (item.country_txt_ || 'Not specified') + '<br>';
+            } else if (zoomLevel >= 6) {
+                popupContent += '<b>Country:</b> ' + (item.country_txt_ || 'Not specified') + '<br>';
+                popupContent += '<b>City:</b> ' + (item.city_ || 'Not specified') + '<br>';
+            }
+
+
+            // Check if there are multiple events
+            let eventCount = item.event_count || 1;
+            popupContent += `<b>Event Count:</b> ${eventCount}<br>`;
+
+            let fatalitiesText = item.nkill_sum !== "Unknown" ? item.nkill_sum : 'Unknown';
+            let injuriesText = item.nwound_sum !== "Unknown" ? item.nwound_sum : 'Unknown';
+
+            popupContent += `<b>Date Range:</b> ${formatDate(item.date_min)} to ${formatDate(item.date_max)}<br>` +
+                `<b>Fatalities:</b> ${item.nkill_sum || 0}<br>` +
+                `<b>Injuries:</b> ${item.nwound_sum || 0}<br>`;
+
+            // Display perpetrators information based on event count
+            if (eventCount > 1) {
+                let perpsAvg = item.nperps_mean !== undefined ? item.nperps_mean : 'Unknown';
+                let perpsTotal = item.nperps_sum !== undefined ? item.nperps_sum : 'Unknown';
+                popupContent += `<b>Perpetrators (Avg):</b> ${perpsAvg}<br>` +
+                    `<b>Perpetrators (Total):</b> ${perpsTotal}<br>`;
+            } else {
+                let perps = item.nperps_sum !== undefined && item.nperps_sum !== 0 ? item.nperps_sum : 'Unknown';
+                popupContent += `<b>Perpetrators:</b> ${perps}<br>`;
+            }
+
+
+            return popupContent;
+
+        }
+
+        function updateDashboardDetails(data) {
+            document.getElementById('visible-points').textContent = data.length;
+            // Update date range
+            var dateRange = getDateRange(data); // Implement getDateRange based on your data
+            document.getElementById('date-range').textContent = dateRange;
+            // Update fatalities count
+            var totalFatalities = data.reduce((acc, item) => acc + (item.nkill || 0), 0);
+            document.getElementById('fatalities').textContent = totalFatalities;
+            // Implement other detail updates similarly
+
+            // Now update the timeline chart based on the filtered data
+            const timelineData = processDataForTimelineChart(data);
+            updateOrCreateChart('timelineGraph', 'bar', timelineData);
+        }
+
+
+        var timelineChart; // Declare this globally if you need to update it later
+
+        function updateCharts(data) {
+            // Assuming processDataForTimelineChart & other processing functions are implemented
+            const timelineData = processDataForTimelineChart(data);
+            var propextentData = processDataForPieChart(data, 'propextent_txt');
+            var targsubtypeData = processDataForPieChart(data, 'targsubtype1_txt');
+            var attacktypeData = processDataForPieChart(data, 'attacktype1_txt');
+            var gnameData = processDataForPieChart(data, 'gname1');
+
+            // Update or create timeline chart
+            updateOrCreateChart('timelineGraph', 'bar', timelineData);
+
+            // Update or create pie charts
+            updateOrCreateChart('propextentChart', 'pie', propextentData);
+            updateOrCreateChart('targsubtypeChart', 'pie', targsubtypeData);
+            updateOrCreateChart('attacktypeChart', 'pie', attacktypeData);
+            updateOrCreateChart('gnameChart', 'pie', gnameData);
+        }
+
+
+
+        function updateOrCreateChart(chartId, chartType, chartData) {
+            var ctx = document.getElementById(chartId).getContext('2d');
+            if (window[chartId] instanceof Chart) {
+                window[chartId].data = chartData;
+                window[chartId].update();
+            } else {
+                window[chartId] = new Chart(ctx, {
+                    type: chartType,
+                    data: chartData,
+                });
+            }
+        }
+
+        function resetAndFetch() {
+            selectedMarkerData = null;
+            fetchData();
+            fetchTimelineData();
+        }
+
+        map.on('moveend', resetAndFetch);
+        map.on('zoomend', resetAndFetch);
+        fetchData();
+        fetchTimelineData();
+    </script>
+
+</body>
+
+</html>
