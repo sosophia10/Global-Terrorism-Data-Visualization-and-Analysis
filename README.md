@@ -34,7 +34,7 @@ This project is an interactive web application that visualizes global terrorism 
   git clone https://github.com/your-username/global-terrorism-viz.git
   ```
 
-2. Navigate to the project directory:
+2. Navigate to the project directory, which could look like:
   
   ```
   cd global-terrorism-viz
