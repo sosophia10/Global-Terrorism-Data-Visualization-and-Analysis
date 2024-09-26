@@ -34,10 +34,10 @@ This project is an interactive web application that visualizes global terrorism 
   git clone https://github.com/sosophia10/Global-Terrorism-Data-Visualization-and-Analysis.git
   ```
 
-2. Navigate to the project directory, which could look like:
+2. Navigate to the project directory:
   
   ```
-  cd global-terrorism-viz
+  cd Global-Terrorism-Data-Visualization-and-Analysis
   ```
 
 3. Install dependencies:
