@@ -52,9 +52,8 @@ This project is an interactive web application that visualizes global terrorism 
   python app.py
   ```
 
-5. Open your web browser and navigate to your local port:
+5. Open your web browser and navigate to a local host, such as:
 
- It should look like
   ```
   http://127.0.0.1:5000
   ```
